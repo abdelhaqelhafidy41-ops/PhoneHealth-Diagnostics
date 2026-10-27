@@ -70,7 +70,9 @@ jobs:
 
           # 4. Provision fallback google-services.json if missing
           if [ ! -f app/google-services.json ]; then
-            cat << 'EOF' > app/google-services.json
+            echo '{"project_info":{"project_number":"862067017915","project_id":"abdelha","storage_bucket":"abdelha.firebasestorage.app"},"client":[{"client_info":{"mobilesdk_app_id":"1:862067017915:android:9b9abdfc9873d2c824819e","android_client_info":{"package_name":"com.aistudio.diagnostics.qxvt"}},"oauth_client":[{"client_id":"862067017915-hk577ppen0116ubjjue8q94rv3vaf0j7.apps.googleusercontent.com","client_type":1,"android_info":{"package_name":"com.aistudio.diagnostics.qxvt","certificate_hash":"e25aa96c7005e94e9aa0b4279d34c391a48970e0"}},{"client_id":"862067017915-k252kl4hk0m9dkl38trdto2mn98o4lil.apps.googleusercontent.com","client_type":3}],"api_key":[{"current_key":"AIzaSyCeT0O_NWxGePErRqWT_ErY5plgJekMhdo"}],"services":{}}],"configuration_version":"1"}' > app/google-services.json
+          fi
+
       - name: Run Unit Tests
         run: ./gradlew testDebugUnitTest --continue --no-daemon --no-configuration-cache --stacktrace
 
