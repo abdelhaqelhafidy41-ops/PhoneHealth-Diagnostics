@@ -206,8 +206,11 @@ fun ReportHistoryScreen(
                                         context = context,
                                         credentialManager = credentialManager,
                                         scope = scope,
+                                        onAccountSelected = { email, name, photo, token ->
+                                            viewModel.setUserAccount(email, name, photo, token)
+                                        },
                                         onAuthSuccess = {
-                                            android.widget.Toast.makeText(context, "Signed in with Google", android.widget.Toast.LENGTH_SHORT).show()
+                                            android.widget.Toast.makeText(context, "Signed in as ${viewModel.userAccount.value?.email}", android.widget.Toast.LENGTH_SHORT).show()
                                         },
                                         onAuthError = { err ->
                                             android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()

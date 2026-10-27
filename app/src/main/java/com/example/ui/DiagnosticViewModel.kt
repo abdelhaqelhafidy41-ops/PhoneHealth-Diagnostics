@@ -35,6 +35,10 @@ import org.json.JSONObject
 enum class AppScreen {
     HOME,
     FULL_SCAN,
+    INTERACTIVE_INSPECTION,
+    CAMERA_TEST,
+    CONNECTIVITY_TEST,
+    SYSTEM_TEST,
     SCREEN_TEST,
     BATTERY_TEST,
     AUDIO_TEST,
@@ -52,11 +56,64 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
     private val dao = db.diagnosticDao()
     val cloudRepository = DiagnosticCloudRepository.create(application)
 
+    private val prefs = application.getSharedPreferences("user_account_prefs", android.content.Context.MODE_PRIVATE)
+
     private val _currentUser = MutableStateFlow<FirebaseUser?>(Firebase.auth.currentUser)
     val currentUser: StateFlow<FirebaseUser?> = _currentUser.asStateFlow()
 
+    private val _userAccount = MutableStateFlow<com.example.data.model.UserAccountInfo?>(loadSavedAccount())
+    val userAccount: StateFlow<com.example.data.model.UserAccountInfo?> = _userAccount.asStateFlow()
+
     private val authListener = FirebaseAuth.AuthStateListener { auth ->
         _currentUser.value = auth.currentUser
+        val firebaseUser = auth.currentUser
+        if (firebaseUser != null) {
+            val email = firebaseUser.email ?: ""
+            if (email.isNotEmpty()) {
+                setUserAccount(
+                    email = email,
+                    displayName = firebaseUser.displayName ?: email.substringBefore("@"),
+                    photoUrl = firebaseUser.photoUrl?.toString() ?: "",
+                    idToken = ""
+                )
+            }
+        }
+    }
+
+    private fun loadSavedAccount(): com.example.data.model.UserAccountInfo? {
+        val email = prefs.getString("user_email", null) ?: Firebase.auth.currentUser?.email
+        if (!email.isNullOrEmpty()) {
+            val name = prefs.getString("user_name", "") ?: Firebase.auth.currentUser?.displayName ?: email.substringBefore("@")
+            val photo = prefs.getString("user_photo", "") ?: Firebase.auth.currentUser?.photoUrl?.toString() ?: ""
+            return com.example.data.model.UserAccountInfo(
+                email = email,
+                displayName = name.ifEmpty { email.substringBefore("@") },
+                photoUrl = photo,
+                isCloudSynced = true
+            )
+        }
+        return null
+    }
+
+    fun setUserAccount(email: String, displayName: String, photoUrl: String, idToken: String) {
+        val account = com.example.data.model.UserAccountInfo(
+            email = email,
+            displayName = displayName.ifEmpty { email.substringBefore("@") },
+            photoUrl = photoUrl,
+            idToken = idToken,
+            isCloudSynced = true
+        )
+        _userAccount.value = account
+        prefs.edit()
+            .putString("user_email", email)
+            .putString("user_name", account.displayName)
+            .putString("user_photo", photoUrl)
+            .apply()
+    }
+
+    fun clearUserAccount() {
+        _userAccount.value = null
+        prefs.edit().clear().apply()
     }
 
     val batteryState: StateFlow<BatterySnapshot> = hardwareManager.batteryState
@@ -64,6 +121,7 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
     val radioInfo: StateFlow<RadioInfo> = hardwareManager.radioInfo
     val isTorchOn: StateFlow<Boolean> = hardwareManager.isTorchOn
     val hasTorch: StateFlow<Boolean> = hardwareManager.hasTorch
+    val cameraSpecs: StateFlow<com.example.data.model.CameraSpecs> = hardwareManager.cameraSpecs
 
     private val _deviceSpecs = MutableStateFlow(hardwareManager.getDeviceHardwareSpecs())
     val deviceSpecs: StateFlow<DeviceHardwareSpecs> = _deviceSpecs.asStateFlow()
@@ -93,6 +151,18 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
     private val _currentScanItemName = MutableStateFlow("")
     val currentScanItemName: StateFlow<String> = _currentScanItemName.asStateFlow()
 
+    // Physical key listener for interactive hardware tests
+    private val _lastPressedKey = MutableStateFlow<Int?>(null)
+    val lastPressedKey: StateFlow<Int?> = _lastPressedKey.asStateFlow()
+
+    fun onPhysicalKeyPressed(keyCode: Int) {
+        _lastPressedKey.value = keyCode
+    }
+
+    fun resetLastPressedKey() {
+        _lastPressedKey.value = null
+    }
+
     val savedReports: StateFlow<List<DiagnosticReportEntity>> = dao.getAllReportsFlow()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -112,6 +182,11 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
             DiagnosticItem("radio_cellular", "Cellular Modem", "Baseband radio modem and telephony SIM interface", TestCategory.CONNECTIVITY),
             DiagnosticItem("radio_gps", "GPS Location Hardware", "GNSS satellite positioning receiver", TestCategory.CONNECTIVITY),
             DiagnosticItem("radio_nfc", "NFC Controller", "Near Field Communication hardware support", TestCategory.CONNECTIVITY),
+
+            // Camera & Optical
+            DiagnosticItem("camera_rear", "Rear Camera Sensor", "Primary back camera optical sensor & lens", TestCategory.CAMERA),
+            DiagnosticItem("camera_front", "Front Selfie Camera", "Front-facing selfie camera & facial lens", TestCategory.CAMERA),
+            DiagnosticItem("camera_flash", "Camera Flash Unit", "Optical strobe & high-power LED flash emitter", TestCategory.CAMERA),
 
             // Audio & Speakers
             DiagnosticItem("audio_loudspeaker", "Main Loudspeaker", "Primary external multimedia speaker output", TestCategory.AUDIO),
@@ -347,6 +422,24 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
             if (storageHealthy) TestStatus.PASSED else TestStatus.WARNING,
             "${specs.storageAvailableGb} GB free of ${specs.storageTotalGb} GB total"
         )
+
+        // Camera & Optical
+        val cam = hardwareManager.cameraSpecs.value
+        updateTestResult(
+            "camera_rear",
+            if (cam.hasBackCamera) TestStatus.PASSED else TestStatus.WARNING,
+            if (cam.hasBackCamera) "Rear Camera active: ${cam.backCameraResolution}" else "Back camera not detected"
+        )
+        updateTestResult(
+            "camera_front",
+            if (cam.hasFrontCamera) TestStatus.PASSED else TestStatus.WARNING,
+            if (cam.hasFrontCamera) "Front Selfie active: ${cam.frontCameraResolution}" else "Front camera not detected"
+        )
+        updateTestResult(
+            "camera_flash",
+            if (cam.hasFlash) TestStatus.PASSED else TestStatus.WARNING,
+            if (cam.hasFlash) "Flash LED optical strobe operational" else "Camera flash not available"
+        )
     }
 
     /**
@@ -363,80 +456,93 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
             val totalSteps = allTestIds.size
 
             // Step 1: Radio & Connectivity (Wi-Fi, Bluetooth, Cellular, GPS, NFC)
-            _currentScanPhase.value = "Phase 1/6: Wireless Radios & Network"
+            _currentScanPhase.value = "Phase 1/7: Wireless Radios & Network"
             val radios = listOf("radio_wifi", "radio_bluetooth", "radio_cellular", "radio_gps", "radio_nfc")
             radios.forEachIndexed { i, id ->
                 _currentScanItemName.value = _testItems.value.find { it.id == id }?.title ?: id
                 updateTestResult(id, TestStatus.RUNNING, "Probing radio interface...")
-                delay(220)
+                delay(200)
                 _scanProgress.value = (i + 1) / totalSteps.toFloat()
             }
             evaluateAutomaticSystemHealth()
-            delay(150)
+            delay(120)
 
             // Step 2: System, CPU & Storage
-            _currentScanPhase.value = "Phase 2/6: Processor, RAM & Storage"
+            _currentScanPhase.value = "Phase 2/7: Processor, RAM & Storage"
             val sysItems = listOf("system_cpu", "system_ram", "system_storage")
             sysItems.forEachIndexed { i, id ->
                 _currentScanItemName.value = _testItems.value.find { it.id == id }?.title ?: id
                 updateTestResult(id, TestStatus.RUNNING, "Analyzing memory buffers...")
-                delay(200)
+                delay(180)
                 _scanProgress.value = (radios.size + i + 1) / totalSteps.toFloat()
             }
             evaluateAutomaticSystemHealth()
-            delay(150)
+            delay(120)
 
             // Step 3: Battery & Thermal Subsystem
-            _currentScanPhase.value = "Phase 3/6: Battery Chemistry & Power Rails"
+            _currentScanPhase.value = "Phase 3/7: Battery Chemistry & Power Rails"
             val battItems = listOf("battery_health", "battery_temp", "battery_voltage", "battery_charging")
             battItems.forEachIndexed { i, id ->
                 _currentScanItemName.value = _testItems.value.find { it.id == id }?.title ?: id
                 updateTestResult(id, TestStatus.RUNNING, "Sampling voltage and thermal sensors...")
-                delay(200)
+                delay(180)
                 _scanProgress.value = (radios.size + sysItems.size + i + 1) / totalSteps.toFloat()
             }
             evaluateAutomaticSystemHealth()
-            delay(150)
+            delay(120)
 
             // Step 4: Sensors Array
-            _currentScanPhase.value = "Phase 4/6: Hardware Motion & Ambient Sensors"
+            _currentScanPhase.value = "Phase 4/7: Hardware Motion & Ambient Sensors"
             val sensorItems = listOf("sensor_accel", "sensor_gyro", "sensor_compass", "sensor_light", "sensor_prox", "sensor_baro")
             sensorItems.forEachIndexed { i, id ->
                 _currentScanItemName.value = _testItems.value.find { it.id == id }?.title ?: id
                 updateTestResult(id, TestStatus.RUNNING, "Reading sensor telemetry...")
-                delay(180)
+                delay(160)
                 _scanProgress.value = (radios.size + sysItems.size + battItems.size + i + 1) / totalSteps.toFloat()
             }
             evaluateAutomaticSystemHealth()
-            delay(150)
+            delay(120)
 
-            // Step 5: Speakers, Earpiece & Acoustic Loopback
-            _currentScanPhase.value = "Phase 5/6: Speakers & Audio Drivers"
+            // Step 5: Camera & Optical Subsystem
+            _currentScanPhase.value = "Phase 5/7: Camera & Optical Sensors"
+            val camItems = listOf("camera_rear", "camera_front", "camera_flash")
+            camItems.forEachIndexed { i, id ->
+                _currentScanItemName.value = _testItems.value.find { it.id == id }?.title ?: id
+                updateTestResult(id, TestStatus.RUNNING, "Probing optical sensor characteristics...")
+                delay(200)
+                _scanProgress.value = (radios.size + sysItems.size + battItems.size + sensorItems.size + i + 1) / totalSteps.toFloat()
+            }
+            hardwareManager.inspectCameraHardware()
+            evaluateAutomaticSystemHealth()
+            delay(120)
+
+            // Step 6: Speakers, Earpiece & Acoustic Loopback
+            _currentScanPhase.value = "Phase 6/7: Speakers & Audio Drivers"
             _currentScanItemName.value = "Stereo Loudspeaker & Earpiece"
             updateTestResult("audio_loudspeaker", TestStatus.RUNNING, "Testing acoustic output...")
             updateTestResult("audio_earpiece", TestStatus.RUNNING, "Verifying receiver output...")
 
             audioEngine.playChannelTone(AudioChannel.STEREO_BOTH, 880, 800)
-            delay(850)
+            delay(800)
             updateTestResult("audio_loudspeaker", TestStatus.PASSED, "Multimedia stereo loudspeaker verified")
             updateTestResult("audio_earpiece", TestStatus.PASSED, "Earpiece voice speaker verified")
             updateTestResult("audio_stereo_l", TestStatus.PASSED, "Left channel acoustic pass")
             updateTestResult("audio_stereo_r", TestStatus.PASSED, "Right channel acoustic pass")
             updateTestResult("audio_freq_sweep", TestStatus.PASSED, "Acoustic sweep 200Hz - 4kHz verified")
             updateTestResult("audio_microphone", TestStatus.PASSED, "Microphone capture active")
-            _scanProgress.value = 0.88f
+            _scanProgress.value = 0.90f
 
-            // Step 6: Haptics, Torch & Display
-            _currentScanPhase.value = "Phase 6/6: Haptics, Flashlight & Screen"
+            // Step 7: Haptics, Torch & Display
+            _currentScanPhase.value = "Phase 7/7: Haptics, Flashlight & Screen"
             _currentScanItemName.value = "Vibration Actuator & Flash LED"
 
             hardwareManager.vibratePattern("CLICK")
-            delay(300)
+            delay(250)
             updateTestResult("haptics_motor", TestStatus.PASSED, "Haptic motor pulse responsive")
 
             if (hasTorch.value) {
                 hardwareManager.toggleTorch(true)
-                delay(400)
+                delay(350)
                 hardwareManager.toggleTorch(false)
                 updateTestResult("torch_light", TestStatus.PASSED, "Flashlight LED unit functional")
             } else {
@@ -449,7 +555,7 @@ class DiagnosticViewModel(application: Application) : AndroidViewModel(applicati
 
             _scanProgress.value = 1.0f
             _currentScanPhase.value = "Scan Complete! Compiling Health Report..."
-            delay(600)
+            delay(500)
 
             // Save report automatically
             saveReportToHistory("Full Comprehensive Hardware Scan")

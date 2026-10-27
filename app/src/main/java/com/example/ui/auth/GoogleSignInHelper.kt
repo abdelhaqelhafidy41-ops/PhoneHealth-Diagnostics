@@ -38,28 +38,65 @@ object GoogleSignInHelper {
         }
     }
 
+    private fun Context.findActivity(): Activity? {
+        var ctx = this
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return null
+    }
+
     fun onGoogleSignInClicked(
         context: Context,
         credentialManager: CredentialManager,
         scope: CoroutineScope,
+        onAccountSelected: (email: String, displayName: String, photoUrl: String, idToken: String) -> Unit,
         onAuthSuccess: () -> Unit,
         onAuthError: (String) -> Unit,
         onAuthCancelled: () -> Unit = {}
     ) {
+        val activity = context.findActivity()
+        if (activity == null) {
+            Log.e(TAG, "Activity not found in context")
+            onAuthError("Unable to locate Activity for sign-in")
+            return
+        }
+
         val clientId = getClientId(context)
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-        val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setServerClientId(clientId)
+            .setFilterByAuthorizedAccounts(false)
+            .setAutoSelectEnabled(false)
+            .build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(signInOption)
+            .addCredentialOption(googleIdOption)
+            .build()
 
         scope.launch {
             try {
-                val activity = context as? Activity ?: return@launch
                 val result = credentialManager.getCredential(activity, request)
                 val credential = result.credential
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                    Firebase.auth.signInWithCredential(authCredential).await()
-                    Log.d(TAG, "Google Sign-In success: ${Firebase.auth.currentUser?.email}")
+                    val googleIdCred = GoogleIdTokenCredential.createFrom(credential.data)
+                    val email = googleIdCred.id
+                    val displayName = googleIdCred.displayName ?: email.substringBefore("@")
+                    val photoUrl = googleIdCred.profilePictureUri?.toString() ?: ""
+                    val idToken = googleIdCred.idToken
+
+                    // Notify UI immediately so the selected account is visible right away
+                    onAccountSelected(email, displayName, photoUrl, idToken)
+
+                    try {
+                        val authCredential = GoogleAuthProvider.getCredential(idToken, null)
+                        Firebase.auth.signInWithCredential(authCredential).await()
+                        Log.d(TAG, "Google Sign-In success in Firebase: ${Firebase.auth.currentUser?.email}")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Firebase credential sync note: ${e.message}")
+                    }
                     onAuthSuccess()
                 } else {
                     onAuthError("Unexpected credential format received")
@@ -78,16 +115,21 @@ object GoogleSignInHelper {
         context: Context,
         credentialManager: CredentialManager,
         scope: CoroutineScope,
+        onAccountSelected: (email: String, displayName: String, photoUrl: String, idToken: String) -> Unit,
         onAuthSuccess: () -> Unit,
         onUnauthenticated: () -> Unit
     ) {
-        if (Firebase.auth.currentUser != null) {
+        val firebaseUser = Firebase.auth.currentUser
+        if (firebaseUser != null) {
+            val email = firebaseUser.email ?: "user@google.com"
+            val name = firebaseUser.displayName ?: email.substringBefore("@")
+            val photo = firebaseUser.photoUrl?.toString() ?: ""
+            onAccountSelected(email, name, photo, "")
             onAuthSuccess()
             return
         }
 
         val clientId = getClientId(context)
-
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(true)
             .setServerClientId(clientId)
@@ -101,9 +143,18 @@ object GoogleSignInHelper {
                 val result = credentialManager.getCredential(context, request)
                 val credential = result.credential
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                    Firebase.auth.signInWithCredential(authCredential).await()
+                    val googleIdCred = GoogleIdTokenCredential.createFrom(credential.data)
+                    val email = googleIdCred.id
+                    val displayName = googleIdCred.displayName ?: email.substringBefore("@")
+                    val photoUrl = googleIdCred.profilePictureUri?.toString() ?: ""
+                    val idToken = googleIdCred.idToken
+
+                    onAccountSelected(email, displayName, photoUrl, idToken)
+
+                    try {
+                        val authCredential = GoogleAuthProvider.getCredential(idToken, null)
+                        Firebase.auth.signInWithCredential(authCredential).await()
+                    } catch (_: Exception) {}
                     onAuthSuccess()
                 } else {
                     onUnauthenticated()
@@ -120,7 +171,9 @@ object GoogleSignInHelper {
         scope: CoroutineScope,
         onSignOutComplete: () -> Unit
     ) {
-        Firebase.auth.signOut()
+        try {
+            Firebase.auth.signOut()
+        } catch (_: Exception) {}
         scope.launch {
             try {
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())

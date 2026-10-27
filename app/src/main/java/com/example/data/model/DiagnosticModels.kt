@@ -6,6 +6,7 @@ enum class TestCategory(val displayName: String, val iconDescription: String) {
     BATTERY("Battery & Power", "Cell condition, voltage and thermal state"),
     AUDIO("Speakers & Microphones", "Loudspeaker, earpiece receiver and microphone"),
     SENSORS("Hardware Sensors", "Motion, orientation, light and proximity"),
+    CAMERA("Camera & Optical", "Rear, front selfie camera and optical sensors"),
     HAPTICS_TORCH("Haptics & Torch", "Vibration motors and camera flash"),
     SYSTEM_INFO("System & Processor", "CPU cores, RAM and internal storage")
 }
@@ -45,6 +46,26 @@ data class RadioInfo(
     val gpsEnabled: Boolean = false,
     val nfcAvailable: Boolean = false,
     val nfcEnabled: Boolean = false
+)
+
+data class CameraSpecs(
+    val hasBackCamera: Boolean = false,
+    val backCameraResolution: String = "",
+    val backCameraMegapixels: Double = 0.0,
+    val hasFrontCamera: Boolean = false,
+    val frontCameraResolution: String = "",
+    val frontCameraMegapixels: Double = 0.0,
+    val hasFlash: Boolean = false,
+    val totalCamerasCount: Int = 0,
+    val sensorDetails: String = ""
+)
+
+data class UserAccountInfo(
+    val email: String = "",
+    val displayName: String = "",
+    val photoUrl: String = "",
+    val idToken: String = "",
+    val isCloudSynced: Boolean = true
 )
 
 data class BatterySnapshot(

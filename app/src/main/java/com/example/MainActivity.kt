@@ -27,9 +27,25 @@ import com.example.ui.screens.SensorsTestScreen
 import com.example.ui.theme.DiagnosticDarkBg
 import com.example.ui.theme.MyApplicationTheme
 
+import android.view.KeyEvent
+import com.example.ui.screens.CameraTestScreen
+import com.example.ui.screens.ConnectivityTestScreen
+import com.example.ui.screens.InteractiveInspectionScreen
+import com.example.ui.screens.SystemHardwareScreen
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: DiagnosticViewModel by viewModels()
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (viewModel.currentScreen.value == AppScreen.INTERACTIVE_INSPECTION) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                viewModel.onPhysicalKeyPressed(keyCode)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +72,22 @@ class MainActivity : ComponentActivity() {
                             AppScreen.FULL_SCAN -> FullScanScreen(
                                 viewModel = viewModel,
                                 onFinish = { viewModel.navigateTo(AppScreen.REPORT_DETAIL) },
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.INTERACTIVE_INSPECTION -> InteractiveInspectionScreen(
+                                viewModel = viewModel,
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.CAMERA_TEST -> CameraTestScreen(
+                                viewModel = viewModel,
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.CONNECTIVITY_TEST -> ConnectivityTestScreen(
+                                viewModel = viewModel,
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.SYSTEM_TEST -> SystemHardwareScreen(
+                                viewModel = viewModel,
                                 onBack = { viewModel.navigateBack() }
                             )
                             AppScreen.SCREEN_TEST -> ScreenTestScreen(

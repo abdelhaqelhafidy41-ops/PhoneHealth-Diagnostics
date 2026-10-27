@@ -34,6 +34,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -96,7 +98,7 @@ fun HomeScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val credentialManager = remember { androidx.credentials.CredentialManager.create(context) }
-    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val userAccount by viewModel.userAccount.collectAsStateWithLifecycle()
     var showSignOutDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -105,6 +107,9 @@ fun HomeScreen(
             context = context,
             credentialManager = credentialManager,
             scope = coroutineScope,
+            onAccountSelected = { email, name, photo, token ->
+                viewModel.setUserAccount(email, name, photo, token)
+            },
             onAuthSuccess = {},
             onUnauthenticated = {}
         )
@@ -115,15 +120,18 @@ fun HomeScreen(
             DiagnosticTopAppBar(
                 title = "Hardware Diagnostics",
                 actions = {
-                    if (currentUser == null) {
+                    if (userAccount == null) {
                         OutlinedButton(
                             onClick = {
                                 GoogleSignInHelper.onGoogleSignInClicked(
                                     context = context,
                                     credentialManager = credentialManager,
                                     scope = coroutineScope,
+                                    onAccountSelected = { email, name, photo, token ->
+                                        viewModel.setUserAccount(email, name, photo, token)
+                                    },
                                     onAuthSuccess = {
-                                        Toast.makeText(context, "Signed in with Google", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Signed in as ${viewModel.userAccount.value?.email}", Toast.LENGTH_SHORT).show()
                                     },
                                     onAuthError = { err: String ->
                                         Toast.makeText(context, err, Toast.LENGTH_LONG).show()
@@ -147,20 +155,29 @@ fun HomeScreen(
                             modifier = Modifier
                                 .clickable { showSignOutDialog = true }
                                 .padding(horizontal = 4.dp)
+                                .testTag("signed_in_account_chip")
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudDone,
-                                    contentDescription = "Cloud Synced",
-                                    tint = GreenSuccess,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .background(GreenSuccess),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = (userAccount?.email?.take(1) ?: "U").uppercase(),
+                                        color = Color.Black,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = currentUser?.email?.substringBefore("@") ?: "Synced",
+                                    text = userAccount?.email?.substringBefore("@") ?: "Synced",
                                     fontSize = 11.sp,
                                     color = GreenSuccess,
                                     fontWeight = FontWeight.SemiBold
@@ -187,20 +204,36 @@ fun HomeScreen(
         if (showSignOutDialog) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { showSignOutDialog = false },
-                title = { Text("Google Account Sync", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                title = { Text("Google Account Connected", color = TextPrimary, fontWeight = FontWeight.Bold) },
                 text = {
-                    Text(
-                        text = "Signed in as ${currentUser?.email}.\nCloud Firestore sync is active for diagnostic reports.",
-                        color = TextSecondary,
-                        fontSize = 13.sp
-                    )
+                    Column {
+                        Text(
+                            text = "Account: ${userAccount?.displayName ?: "User"}",
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Email: ${userAccount?.email}",
+                            color = CyanAccent,
+                            fontSize = 13.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Cloud Firestore sync is active. Your hardware diagnostic scans and reports are securely backed up to the cloud under this account.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
                             showSignOutDialog = false
+                            viewModel.clearUserAccount()
                             GoogleSignInHelper.signOut(context, credentialManager, coroutineScope) {
-                                android.widget.Toast.makeText(context, "Signed out", android.widget.Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = RedDanger)
@@ -320,6 +353,77 @@ fun HomeScreen(
                 }
             }
 
+            // Interactive Guided Phone Test Hero Card
+            Surface(
+                color = DiagnosticSurface,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, CyanAccent.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onNavigate(AppScreen.INTERACTIVE_INSPECTION) }
+                    .testTag("interactive_inspection_hero_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(CyanAccent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = CyanAccent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Personal Interactive Test",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(GreenSuccess.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "HANDS-ON",
+                                    color = GreenSuccess,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Personally test touch grid, colors, volume keys, earpiece, speakers, mic, cameras & sensors",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = CyanAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
             // Real-Time Telemetry Quick Strip
             Text(
                 text = "REAL-TIME HARDWARE METRICS",
@@ -388,7 +492,25 @@ fun HomeScreen(
                 icon = Icons.Default.Wifi,
                 category = TestCategory.CONNECTIVITY,
                 testItems = testItems,
-                onClick = { onNavigate(AppScreen.FULL_SCAN) }
+                onClick = { onNavigate(AppScreen.CONNECTIVITY_TEST) }
+            )
+
+            ComponentCategoryCard(
+                title = "Camera & Optical Sensors",
+                description = "Live viewfinder preview, front/rear camera switch, optical strobe flash check",
+                icon = Icons.Default.CameraAlt,
+                category = TestCategory.CAMERA,
+                testItems = testItems,
+                onClick = { onNavigate(AppScreen.CAMERA_TEST) }
+            )
+
+            ComponentCategoryCard(
+                title = "Processor, RAM & Storage",
+                description = "CPU core benchmark, RAM buffer allocation and flash memory I/O speed",
+                icon = Icons.Default.Speed,
+                category = TestCategory.SYSTEM_INFO,
+                testItems = testItems,
+                onClick = { onNavigate(AppScreen.SYSTEM_TEST) }
             )
 
             ComponentCategoryCard(
